@@ -11,6 +11,14 @@ class Html2Text {
 		);
 	}
 
+	public static function defaultTemplates() {
+		return array(
+			'a_no_href'   => "[%s]",
+			'a_with_href' => "[%s](%s)",
+			'img'		  => "[%s]",
+		);
+	}
+
 	/**
 	 * Tries to convert the given HTML into a plain text format - best suited for
 	 * e-mail display, etc.
@@ -22,11 +30,12 @@ class Html2Text {
 	 * </ul>
 	 *
 	 * @param string $html the input HTML
-	 * @param boolean $ignore_error Ignore xml parsing errors
+	 * @param array $options
+	 * @param array $templates
 	 * @return string the HTML converted, as best as possible, to text
-	 * @throws Html2TextException if the HTML could not be loaded as a {@link \DOMDocument}
+	 * @throws Html2TextException if the HTML could not be loaded as a <a href='psi_element://\DOMDocument'>\DOMDocument</a>
 	 */
-	public static function convert($html, $options = array()) {
+	public static function convert($html, $options = array(), $templates = array()) {
 
 		if ($options === false || $options === true) {
 			// Using old style (< 1.0) of passing in options
@@ -39,6 +48,15 @@ class Html2Text {
 		foreach ($options as $key => $value) {
 			if (!in_array($key, array_keys(static::defaultOptions()))) {
 				throw new \InvalidArgumentException("Unknown html2text option '$key'");
+			}
+		}
+
+		$templates = array_merge(static::defaultTemplates(), $templates);
+
+		// check all templates are valid
+		foreach ($templates as $key => $value) {
+			if (!in_array($key, array_keys(static::defaultTemplates()))) {
+				throw new \InvalidArgumentException("Unknown html2text template '$key'");
 			}
 		}
 
@@ -56,7 +74,7 @@ class Html2Text {
 
 		$doc = static::getDocument($html, $options['ignore_errors']);
 
-		$output = static::iterateOverNode($doc, null, false, $is_office_document, $options);
+		$output = static::iterateOverNode($doc, null, false, $is_office_document, $options, $templates);
 
 		// process output for whitespace/newlines
 		$output = static::processWhitespaceNewlines($output);
@@ -138,6 +156,7 @@ class Html2Text {
 	 * @param string $html the input HTML
 	 * @param boolean $ignore_error Ignore xml parsing errors
 	 * @return \DOMDocument the parsed document tree
+	 * @throws Html2TextException
 	 */
 	static function getDocument($html, $ignore_error = false) {
 
@@ -228,7 +247,7 @@ class Html2Text {
 		return $nextName;
 	}
 
-	static function iterateOverNode($node, $prevName = null, $in_pre = false, $is_office_document = false, $options) {
+	static function iterateOverNode($node, $prevName = null, $in_pre = false, $is_office_document = false, $options, $templates) {
 		if ($node instanceof \DOMText) {
 		  // Replace whitespace characters with a space (equivilant to \s)
 			if ($in_pre) {
@@ -339,7 +358,6 @@ class Html2Text {
 		//$output .= "[$name,$nextName]";
 
 		if (isset($node->childNodes)) {
-
 			$n = $node->childNodes->item(0);
 			$previousSiblingNames = array();
 			$previousSiblingName = null;
@@ -348,8 +366,14 @@ class Html2Text {
 			$trailing_whitespace = 0;
 
 			while ($n != null) {
-
-				$text = static::iterateOverNode($n, $previousSiblingName, $in_pre || $name == 'pre', $is_office_document, $options);
+				$text = static::iterateOverNode(
+					$n,
+					$previousSiblingName,
+					$in_pre || $name == 'pre',
+					$is_office_document,
+					$options,
+					$templates
+				);
 
 				// Pass current node name to next child, as previousSibling does not appear to get populated
 				if ($n instanceof \DOMDocumentType
@@ -436,7 +460,7 @@ class Html2Text {
 						if ($options['drop_links']) {
 							$output = "$output";
 						} else {
-							$output = "[$output]";
+							$output = sprintf($templates['a_no_href'], $output);
 						}
 					}
 				} else {
@@ -449,7 +473,7 @@ class Html2Text {
 							if ($options['drop_links']) {
 								$output = "$output";
 							} else {
-								$output = "[$output]($href)";
+								$output = sprintf($templates['a_with_href'], $output, $href);
 							}
 						} else {
 							// empty string
@@ -468,9 +492,9 @@ class Html2Text {
 
 			case "img":
 				if ($node->getAttribute("title")) {
-					$output = "[" . $node->getAttribute("title") . "]";
+					$output = sprintf($templates['img'], $node->getAttribute("title"));
 				} elseif ($node->getAttribute("alt")) {
-					$output = "[" . $node->getAttribute("alt") . "]";
+					$output = sprintf($templates['img'], $node->getAttribute("alt"));
 				} else {
 					$output = "";
 				}
